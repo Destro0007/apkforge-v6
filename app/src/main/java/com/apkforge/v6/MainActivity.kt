@@ -17,8 +17,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 
 private val ForgeBackground = Color(0xFF0B1020)
@@ -97,6 +99,48 @@ private class ProjectStore(context: Context) {
     }
 }
 
+private class GeneratedFileWriter(context: Context) {
+    private val root = File(context.filesDir, "apkforge_projects")
+
+    fun save(
+        projectId: String,
+        files: List<GeneratedProjectFile>
+    ) {
+        val safeId = projectId.replace(Regex("[^A-Za-z0-9_-]"), "")
+        require(safeId.isNotBlank()) { "Invalid project ID" }
+
+        val projectDirectory = File(root, safeId).canonicalFile
+        val canonicalRoot = root.canonicalFile
+
+        require(projectDirectory.parentFile == canonicalRoot) {
+            "Invalid project directory"
+        }
+
+        if (!projectDirectory.exists() && !projectDirectory.mkdirs()) {
+            throw IllegalStateException("Could not create project directory")
+        }
+
+        files.forEach { generated ->
+            require(generated.fileName.matches(Regex("[A-Za-z0-9_.-]+"))) {
+                "Invalid generated file name"
+            }
+
+            val extension = generated.fileName.substringAfterLast(".", "")
+            require(extension in setOf("kt", "md")) {
+                "Unsupported generated file type"
+            }
+
+            val target = File(projectDirectory, generated.fileName).canonicalFile
+
+            require(target.parentFile == projectDirectory) {
+                "Invalid generated file path"
+            }
+
+            target.writeText(generated.content, Charsets.UTF_8)
+        }
+    }
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -154,12 +198,8 @@ private fun ApkForgeApp() {
                                 openedProjectId = null
                             }
                         },
-                        icon = {
-                            Text(tab.symbol, fontSize = 19.sp)
-                        },
-                        label = {
-                            Text(tab.title, fontSize = 10.sp)
-                        }
+                        icon = { Text(tab.symbol, fontSize = 19.sp) },
+                        label = { Text(tab.title, fontSize = 10.sp) }
                     )
                 }
             }
@@ -178,9 +218,7 @@ private fun ApkForgeApp() {
                         selectedTab = ForgeTab.PROJECTS
                         openedProjectId = null
                     },
-                    onOpenAi = {
-                        selectedTab = ForgeTab.AI
-                    }
+                    onOpenAi = { selectedTab = ForgeTab.AI }
                 )
 
                 ForgeTab.PROJECTS -> {
@@ -197,26 +235,16 @@ private fun ApkForgeApp() {
                         ProjectDetailScreen(
                             project = openedProject,
                             existingProjects = projects.toList(),
-                            onBack = {
-                                openedProjectId = null
-                            },
+                            onBack = { openedProjectId = null },
                             onUpdate = { updated ->
-                                val index =
-                                    projects.indexOfFirst {
-                                        it.id == updated.id
-                                    }
-
-                                if (index >= 0) {
-                                    projects[index] = updated
+                                val index = projects.indexOfFirst {
+                                    it.id == updated.id
                                 }
-
+                                if (index >= 0) projects[index] = updated
                                 saveProjects()
                             },
                             onDelete = {
-                                projects.removeAll {
-                                    it.id == openedProject.id
-                                }
-
+                                projects.removeAll { it.id == openedProject.id }
                                 saveProjects()
                                 openedProjectId = null
                             }
@@ -224,16 +252,7 @@ private fun ApkForgeApp() {
                     }
                 }
 
-                ForgeTab.AI -> InfoScreen(
-                    "AI Studio",
-                    "Your free-first development workspace.",
-                    listOf(
-                        "Model routing: planned",
-                        "Local model support: planned",
-                        "Prompt-to-app generation: planned",
-                        "Code explanation and repair: planned"
-                    )
-                )
+                ForgeTab.AI -> AiStudioScreen(projects)
 
                 ForgeTab.BUILDS -> InfoScreen(
                     "Cloud Builds",
@@ -262,6 +281,201 @@ private fun ApkForgeApp() {
 }
 
 @Composable
+private fun AiStudioScreen(projects: List<ForgeProject>) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val provider = remember { OfflineTemplateProvider() }
+    val writer = remember(context) { GeneratedFileWriter(context) }
+
+    var selectedProjectId by remember(projects) {
+        mutableStateOf(projects.firstOrNull()?.id ?: "")
+    }
+
+    var description by remember { mutableStateOf("") }
+    var isGenerating by remember { mutableStateOf(false) }
+    var status by remember {
+        mutableStateOf("Choose a project and describe the app you want to create.")
+    }
+    var generatedSummary by remember { mutableStateOf("") }
+
+    val selectedProject = projects.firstOrNull {
+        it.id == selectedProjectId
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+    ) {
+        Spacer(Modifier.height(22.dp))
+
+        Text(
+            "AI Studio",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            "Free-first project generation workspace",
+            color = ForgeMuted,
+            fontSize = 13.sp
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = ForgePanel),
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
+            ) {
+                Text(
+                    "GENERATION PROVIDER",
+                    color = ForgeAccent,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 10.sp
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(provider.displayName, fontWeight = FontWeight.SemiBold)
+
+                Text(
+                    "Works offline. Uses starter templates, not an AI model.",
+                    color = ForgeMuted,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
+
+        Text("Target project", fontWeight = FontWeight.SemiBold)
+
+        Spacer(Modifier.height(6.dp))
+
+        if (projects.isEmpty()) {
+            Text(
+                "Create a project first in the Projects tab.",
+                color = ForgeMuted,
+                fontSize = 13.sp
+            )
+        } else {
+            projects.forEach { project ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selectedProjectId = project.id }
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    RadioButton(
+                        selected = selectedProjectId == project.id,
+                        onClick = { selectedProjectId = project.id }
+                    )
+
+                    Column {
+                        Text(project.name, fontSize = 13.sp)
+                        Text(
+                            project.packageName,
+                            color = ForgeMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text("Describe your Android app", fontWeight = FontWeight.SemiBold)
+
+        Spacer(Modifier.height(6.dp))
+
+        OutlinedTextField(
+            value = description,
+            onValueChange = { description = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 110.dp),
+            placeholder = {
+                Text("Example: Create a simple hotel room-service ordering app.")
+            },
+            enabled = !isGenerating
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        Button(
+            onClick = {
+                val target = selectedProject
+                if (target == null) {
+                    status = "Create or select a project first."
+                } else {
+                    scope.launch {
+                        isGenerating = true
+                        status = "Generating starter files..."
+                        generatedSummary = ""
+
+                        try {
+                            val result = provider.generate(
+                                AiGenerationRequest(
+                                    projectName = target.name,
+                                    packageName = target.packageName,
+                                    description = description
+                                )
+                            )
+
+                            writer.save(target.id, result.files)
+
+                            generatedSummary = result.summary
+                            status = "Saved ${result.files.size} files to ${target.name}."
+                        } catch (error: Exception) {
+                            status = error.message ?: "Generation failed."
+                        } finally {
+                            isGenerating = false
+                        }
+                    }
+                }
+            },
+            enabled = !isGenerating &&
+                selectedProject != null &&
+                description.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (isGenerating) "Generating..." else "Generate project files")
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        Text(
+            status,
+            color = ForgeAccent,
+            fontSize = 12.sp
+        )
+
+        if (generatedSummary.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                generatedSummary,
+                color = ForgeMuted,
+                fontSize = 11.sp
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        Text(
+            "After generation, open Projects → your project → Open file manager & code editor.",
+            color = ForgeMuted,
+            fontSize = 11.sp
+        )
+    }
+}
+
+@Composable
 private fun HomeScreen(
     projectCount: Int,
     onCreateProject: () -> Unit,
@@ -269,12 +483,7 @@ private fun HomeScreen(
 ) {
     Spacer(Modifier.height(22.dp))
 
-    Text(
-        "APKFORGE",
-        color = ForgeAccent,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold
-    )
+    Text("APKFORGE", color = ForgeAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 
     Text(
         "Build something\nremarkable.",
@@ -284,11 +493,7 @@ private fun HomeScreen(
     )
 
     Spacer(Modifier.height(8.dp))
-    Text(
-        "Your AI-powered app factory.",
-        color = ForgeMuted,
-        fontSize = 14.sp
-    )
+    Text("Your AI-powered app factory.", color = ForgeMuted, fontSize = 14.sp)
 
     Spacer(Modifier.height(22.dp))
 
@@ -302,69 +507,41 @@ private fun HomeScreen(
     Text("Quick actions", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(10.dp))
 
-    ActionCard(
-        "＋  Create a project",
-        "Start a new Android application",
-        onCreateProject
-    )
+    ActionCard("＋  Create a project", "Start a new Android application", onCreateProject)
 
     Spacer(Modifier.height(10.dp))
 
-    ActionCard(
-        "✦  Open AI Studio",
-        "Generate, explain and improve code",
-        onOpenAi
-    )
+    ActionCard("✦  Open AI Studio", "Generate starter project files offline", onOpenAi)
 
     Spacer(Modifier.height(18.dp))
     Text("Development roadmap", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(8.dp))
 
     InfoLine("01", "Project workspace", "Local save enabled")
-    InfoLine("02", "AI generation and editor", "Planned")
+    InfoLine("02", "Offline file generation", "First version")
     InfoLine("03", "GitHub cloud build", "Workflow ready")
-    InfoLine("04", "Verify and install APK", "Planned")
+    InfoLine("04", "AI model integration", "Next milestone")
 
     Spacer(Modifier.height(20.dp))
 }
 
 @Composable
-private fun MetricCard(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier
-) {
+private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = ForgePanel),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(Modifier.padding(12.dp)) {
-            Text(
-                label,
-                color = ForgeMuted,
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold
-            )
-
+            Text(label, color = ForgeMuted, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(7.dp))
-
-            Text(
-                value,
-                color = ForgeAccent,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Text(value, color = ForgeAccent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
-private fun ActionCard(
-    title: String,
-    subtitle: String,
-    onClick: () -> Unit
-) {
+private fun ActionCard(title: String, subtitle: String, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -381,11 +558,7 @@ private fun ActionCard(
 }
 
 @Composable
-private fun InfoLine(
-    number: String,
-    title: String,
-    status: String
-) {
+private fun InfoLine(number: String, title: String, status: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -396,7 +569,6 @@ private fun InfoLine(
             Text(number, color = ForgeAccent, fontWeight = FontWeight.Bold)
             Text(title, fontSize = 13.sp)
         }
-
         Text(status, color = ForgeMuted, fontSize = 11.sp)
     }
 }
@@ -410,14 +582,8 @@ private fun ProjectsScreen(
     var showEditor by remember { mutableStateOf(false) }
 
     Spacer(Modifier.height(22.dp))
-
     Text("Projects", fontSize = 28.sp, fontWeight = FontWeight.Bold)
-
-    Text(
-        "Your projects are saved on this device.",
-        color = ForgeMuted,
-        fontSize = 13.sp
-    )
+    Text("Your projects are saved on this device.", color = ForgeMuted, fontSize = 13.sp)
 
     Spacer(Modifier.height(16.dp))
 
@@ -428,10 +594,7 @@ private fun ProjectsScreen(
     Spacer(Modifier.height(14.dp))
 
     if (projects.isEmpty()) {
-        Text(
-            "No projects yet. Create your first project.",
-            color = ForgeMuted
-        )
+        Text("No projects yet. Create your first project.", color = ForgeMuted)
     } else {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(projects.size) { index ->
@@ -441,36 +604,15 @@ private fun ProjectsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpen(project) },
-                    colors = CardDefaults.cardColors(
-                        containerColor = ForgePanel
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = ForgePanel),
                     shape = RoundedCornerShape(14.dp)
                 ) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        Text(
-                            project.name,
-                            fontWeight = FontWeight.SemiBold
-                        )
-
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text(project.name, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(4.dp))
-
-                        Text(
-                            project.packageName,
-                            color = ForgeMuted,
-                            fontSize = 11.sp
-                        )
-
+                        Text(project.packageName, color = ForgeMuted, fontSize = 11.sp)
                         Spacer(Modifier.height(8.dp))
-
-                        Text(
-                            "Open workspace  →",
-                            color = ForgeAccent,
-                            fontSize = 11.sp
-                        )
+                        Text("Open workspace  →", color = ForgeAccent, fontSize = 11.sp)
                     }
                 }
             }
@@ -511,62 +653,26 @@ private fun ProjectDetailScreen(
             onBack = { showWorkspace = false }
         )
     } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-        ) {
+        Column(Modifier.fillMaxSize()) {
             Spacer(Modifier.height(22.dp))
-
-            TextButton(onClick = onBack) {
-                Text("←  All projects")
-            }
-
-            Text(
-                project.name,
-                fontSize = 27.sp,
-                fontWeight = FontWeight.Bold
-            )
-
+            TextButton(onClick = onBack) { Text("←  All projects") }
+            Text(project.name, fontSize = 27.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(6.dp))
-
             Text("Project workspace", color = ForgeMuted, fontSize = 13.sp)
-
             Spacer(Modifier.height(18.dp))
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = ForgePanel),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                ) {
-                    Text(
-                        "APPLICATION ID",
-                        color = ForgeMuted,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    Text("APPLICATION ID", color = ForgeMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
                     Text(project.packageName, fontSize = 14.sp)
-
                     Spacer(Modifier.height(16.dp))
-
-                    Text(
-                        "WORKSPACE STATUS",
-                        color = ForgeMuted,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
+                    Text("WORKSPACE STATUS", color = ForgeMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(8.dp))
-
-                    Text(
-                        "Project details are stored locally on this device.",
-                        fontSize = 13.sp
-                    )
+                    Text("Project details are stored locally on this device.", fontSize = 13.sp)
                 }
             }
 
@@ -616,27 +722,16 @@ private fun ProjectDetailScreen(
             onDismissRequest = { showDeleteConfirm = false },
             title = { Text("Delete ${project.name}?") },
             text = {
-                Text(
-                    "This removes the saved project details from this device. " +
-                        "This cannot be undone."
-                )
+                Text("This removes the saved project details from this device. This cannot be undone.")
             },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteConfirm = false
-                        onDelete()
-                    }
-                ) {
-                    Text("Delete")
-                }
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDelete()
+                }) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { showDeleteConfirm = false }
-                ) {
-                    Text("Cancel")
-                }
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
             }
         )
     }
@@ -649,10 +744,7 @@ private fun ProjectEditorDialog(
     onDismiss: () -> Unit,
     onSave: (ForgeProject) -> Unit
 ) {
-    var name by remember(project?.id) {
-        mutableStateOf(project?.name ?: "")
-    }
-
+    var name by remember(project?.id) { mutableStateOf(project?.name ?: "") }
     var packageName by remember(project?.id) {
         mutableStateOf(project?.packageName ?: "com.example.newapp")
     }
@@ -667,9 +759,7 @@ private fun ProjectEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
-            Text(if (project == null) "Create project" else "Edit project")
-        },
+        title = { Text(if (project == null) "Create project" else "Edit project") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -685,30 +775,17 @@ private fun ProjectEditorDialog(
                     onValueChange = { packageName = it },
                     label = { Text("Package name") },
                     singleLine = true,
-                    isError = packageName.isNotBlank() &&
-                        (!validPackage || duplicatePackage)
+                    isError = packageName.isNotBlank() && (!validPackage || duplicatePackage)
                 )
 
                 if (!validName && name.isNotBlank()) {
-                    Text(
-                        "Use 2–40 characters for the project name.",
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 11.sp
-                    )
+                    Text("Use 2–40 characters for the project name.", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
                 }
 
                 if (!validPackage && packageName.isNotBlank()) {
-                    Text(
-                        "Use a valid package name, e.g. com.example.myapp.",
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 11.sp
-                    )
+                    Text("Use a valid package name, e.g. com.example.myapp.", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
                 } else if (duplicatePackage) {
-                    Text(
-                        "This package name is already used by another project.",
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 11.sp
-                    )
+                    Text("This package name is already used by another project.", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
                 }
             }
         },
@@ -729,45 +806,23 @@ private fun ProjectEditorDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
 
 @Composable
-private fun InfoScreen(
-    title: String,
-    subtitle: String,
-    items: List<String>
-) {
+private fun InfoScreen(title: String, subtitle: String, items: List<String>) {
     Spacer(Modifier.height(22.dp))
-
-    Text(
-        title,
-        fontSize = 28.sp,
-        fontWeight = FontWeight.Bold
-    )
-
+    Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(6.dp))
-
-    Text(
-        subtitle,
-        color = ForgeMuted,
-        fontSize = 13.sp
-    )
-
+    Text(subtitle, color = ForgeMuted, fontSize = 13.sp)
     Spacer(Modifier.height(20.dp))
 
     items.forEach { item ->
         Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 10.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = ForgePanel
-            ),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            colors = CardDefaults.cardColors(containerColor = ForgePanel),
             shape = RoundedCornerShape(14.dp)
         ) {
             Row(
