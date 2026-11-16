@@ -501,87 +501,103 @@ private fun ProjectDetailScreen(
 ) {
     var showEditor by remember(project.id) { mutableStateOf(false) }
     var showDeleteConfirm by remember(project.id) { mutableStateOf(false) }
+    var showWorkspace by remember(project.id) { mutableStateOf(false) }
 
-    Spacer(Modifier.height(22.dp))
-
-    TextButton(onClick = onBack) {
-        Text("←  All projects")
-    }
-
-    Text(
-        project.name,
-        fontSize = 27.sp,
-        fontWeight = FontWeight.Bold
-    )
-
-    Spacer(Modifier.height(6.dp))
-
-    Text("Project workspace", color = ForgeMuted, fontSize = 13.sp)
-
-    Spacer(Modifier.height(18.dp))
-
-    Card(
-        colors = CardDefaults.cardColors(containerColor = ForgePanel),
-        shape = RoundedCornerShape(14.dp)
-    ) {
+    if (showWorkspace) {
+        ProjectWorkspaceScreen(
+            projectId = project.id,
+            projectName = project.name,
+            packageName = project.packageName,
+            onBack = { showWorkspace = false }
+        )
+    } else {
         Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
+            modifier = Modifier
+                .fillMaxSize()
         ) {
+            Spacer(Modifier.height(22.dp))
+
+            TextButton(onClick = onBack) {
+                Text("←  All projects")
+            }
+
             Text(
-                "APPLICATION ID",
-                color = ForgeMuted,
-                fontSize = 10.sp,
+                project.name,
+                fontSize = 27.sp,
                 fontWeight = FontWeight.Bold
             )
 
-            Spacer(Modifier.height(8.dp))
-            Text(project.packageName, fontSize = 14.sp)
+            Spacer(Modifier.height(6.dp))
+
+            Text("Project workspace", color = ForgeMuted, fontSize = 13.sp)
+
+            Spacer(Modifier.height(18.dp))
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = ForgePanel),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Text(
+                        "APPLICATION ID",
+                        color = ForgeMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+                    Text(project.packageName, fontSize = 14.sp)
+
+                    Spacer(Modifier.height(16.dp))
+
+                    Text(
+                        "WORKSPACE STATUS",
+                        color = ForgeMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        "Project details are stored locally on this device.",
+                        fontSize = 13.sp
+                    )
+                }
+            }
 
             Spacer(Modifier.height(16.dp))
 
-            Text(
-                "WORKSPACE STATUS",
-                color = ForgeMuted,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Button(
+                onClick = { showWorkspace = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Open file manager & code editor")
+            }
 
             Spacer(Modifier.height(8.dp))
 
-            Text(
-                "Project details are stored locally on this device.",
-                fontSize = 13.sp
-            )
+            OutlinedButton(
+                onClick = { showEditor = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Edit project details")
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { showDeleteConfirm = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Delete project")
+            }
         }
     }
-
-    Spacer(Modifier.height(16.dp))
-
-    Button(
-        onClick = { showEditor = true },
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text("Edit project")
-    }
-
-    Spacer(Modifier.height(8.dp))
-
-    OutlinedButton(
-        onClick = { showDeleteConfirm = true },
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Text("Delete project")
-    }
-
-    Spacer(Modifier.height(8.dp))
-
-    Text(
-        "Code editor, AI generation and APK build controls are not implemented yet.",
-        color = ForgeMuted,
-        fontSize = 11.sp
-    )
 
     if (showEditor) {
         ProjectEditorDialog(
