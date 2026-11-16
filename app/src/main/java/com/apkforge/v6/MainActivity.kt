@@ -2,6 +2,11 @@
 package com.apkforge.v6
 
 import android.content.Context
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.appcheck.appCheck
+import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -144,6 +149,12 @@ private class GeneratedFileWriter(context: Context) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+if (BuildConfig.DEBUG) {
+    Firebase.initialize(context = this)
+    Firebase.appCheck.installAppCheckProviderFactory(
+        DebugAppCheckProviderFactory.getInstance()
+    )
+}
 
         setContent {
             MaterialTheme(
