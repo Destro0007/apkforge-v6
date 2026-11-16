@@ -3,6 +3,7 @@ package com.apkforge.v6
 
 import android.content.Context
 import com.google.firebase.Firebase
+import com.google.firebase.initialize
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.appcheck.appCheck
