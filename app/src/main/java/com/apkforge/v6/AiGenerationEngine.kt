@@ -26,10 +26,6 @@ interface AiCodeProvider {
     ): AiGenerationResult
 }
 
-/**
- * Offline starter provider.
- * This uses deterministic templates, not an AI model.
- */
 class OfflineTemplateProvider : AiCodeProvider {
 
     override val displayName: String =
@@ -38,6 +34,7 @@ class OfflineTemplateProvider : AiCodeProvider {
     override suspend fun generate(
         request: AiGenerationRequest
     ): AiGenerationResult {
+
         val safePackage = request.packageName.trim()
 
         require(PACKAGE_PATTERN.matches(safePackage)) {
@@ -52,7 +49,6 @@ class OfflineTemplateProvider : AiCodeProvider {
                 "A new Android application created with APKForge V6."
             }
 
-        // Escape characters that could break the generated Kotlin string.
         val safeTitle = cleanName
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
