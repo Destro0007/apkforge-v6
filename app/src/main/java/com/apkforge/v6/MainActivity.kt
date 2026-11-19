@@ -795,7 +795,7 @@ private fun InfoLine(
 }
 
 @Composable
-private fun ProjectsScreen(
+private fun ColumnScope.ProjectsScreen(
     projects: List<ForgeProject>,
     onOpen: (ForgeProject) -> Unit,
     onSave: () -> Unit
