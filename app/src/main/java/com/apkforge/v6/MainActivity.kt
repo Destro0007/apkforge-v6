@@ -8,7 +8,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -184,7 +186,14 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ApkForgeApp() {
     val context = LocalContext.current
-    val store = remember(context) { ProjectStore(context) }
+
+    val store = remember(context) {
+        ProjectStore(context)
+    }
+
+    val aiSettingsStore = remember(context) {
+        AiSettingsStore(context)
+    }
 
     val projects = remember(store) {
         mutableStateListOf<ForgeProject>().apply {
@@ -192,8 +201,13 @@ private fun ApkForgeApp() {
         }
     }
 
-    var selectedTab by remember { mutableStateOf(ForgeTab.HOME) }
-    var openedProjectId by remember { mutableStateOf<String?>(null) }
+    var selectedTab by remember {
+        mutableStateOf(ForgeTab.HOME)
+    }
+
+    var openedProjectId by remember {
+        mutableStateOf<String?>(null)
+    }
 
     fun saveProjects() {
         store.save(projects.toList())
@@ -213,20 +227,35 @@ private fun ApkForgeApp() {
                                 openedProjectId = null
                             }
                         },
-                        icon = { Text(tab.symbol, fontSize = 19.sp) },
-                        label = { Text(tab.title, fontSize = 10.sp) }
+                        icon = {
+                            Text(tab.symbol, fontSize = 19.sp)
+                        },
+                        label = {
+                            Text(tab.title, fontSize = 10.sp)
+                        }
                     )
                 }
             }
         }
     ) { padding ->
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(horizontal = 18.dp)
+                .then(
+                    if (selectedTab == ForgeTab.PROJECTS) {
+                        Modifier
+                    } else {
+                        Modifier.verticalScroll(
+                            rememberScrollState()
+                        )
+                    }
+                )
         ) {
             when (selectedTab) {
+
                 ForgeTab.HOME -> HomeScreen(
                     projectCount = projects.size,
                     onCreateProject = {
@@ -240,19 +269,27 @@ private fun ApkForgeApp() {
 
                 ForgeTab.PROJECTS -> {
                     val openedProject =
-                        projects.firstOrNull { it.id == openedProjectId }
+                        projects.firstOrNull {
+                            it.id == openedProjectId
+                        }
 
                     if (openedProject == null) {
                         ProjectsScreen(
                             projects = projects,
-                            onOpen = { openedProjectId = it.id },
-                            onSave = { saveProjects() }
+                            onOpen = {
+                                openedProjectId = it.id
+                            },
+                            onSave = {
+                                saveProjects()
+                            }
                         )
                     } else {
                         ProjectDetailScreen(
                             project = openedProject,
                             existingProjects = projects.toList(),
-                            onBack = { openedProjectId = null },
+                            onBack = {
+                                openedProjectId = null
+                            },
                             onUpdate = { updated ->
                                 val index = projects.indexOfFirst {
                                     it.id == updated.id
@@ -276,7 +313,10 @@ private fun ApkForgeApp() {
                     }
                 }
 
-                ForgeTab.AI -> AiStudioScreen(projects)
+                ForgeTab.AI -> AiStudioScreen(
+                    projects = projects,
+                    settingsStore = aiSettingsStore
+                )
 
                 ForgeTab.BUILDS -> InfoScreen(
                     "Cloud Builds",
@@ -289,15 +329,8 @@ private fun ApkForgeApp() {
                     )
                 )
 
-                ForgeTab.SETTINGS -> InfoScreen(
-                    "Settings",
-                    "APKForge keeps the first release free-first.",
-                    listOf(
-                        "AI provider: Gemini with offline fallback",
-                        "GitHub connection: not connected in app",
-                        "Offline workspace: stored on this device",
-                        "Automatic repair: planned"
-                    )
+                ForgeTab.SETTINGS -> AiProviderSettingsScreen(
+                    settingsStore = aiSettingsStore
                 )
             }
         }
@@ -305,33 +338,49 @@ private fun ApkForgeApp() {
 }
 
 @Composable
-private fun AiStudioScreen(projects: List<ForgeProject>) {
+private fun AiStudioScreen(
+    projects: List<ForgeProject>,
+    settingsStore: AiSettingsStore
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val geminiProvider = remember { GeminiAiProvider() }
-    val offlineProvider = remember { OfflineTemplateProvider() }
-    val writer = remember(context) { GeneratedFileWriter(context) }
+    val aiProvider = remember(settingsStore) {
+        AutoRoutingAiProvider(settingsStore)
+    }
+
+    val writer = remember(context) {
+        GeneratedFileWriter(context)
+    }
 
     var selectedProjectId by remember(projects) {
         mutableStateOf(projects.firstOrNull()?.id ?: "")
     }
 
-    var description by remember { mutableStateOf("") }
-    var isGenerating by remember { mutableStateOf(false) }
-
-    var status by remember {
-        mutableStateOf("Choose a project and describe the app you want to create.")
+    var description by remember {
+        mutableStateOf("")
     }
 
-    var generatedSummary by remember { mutableStateOf("") }
+    var isGenerating by remember {
+        mutableStateOf(false)
+    }
+
+    var status by remember {
+        mutableStateOf(
+            "Choose a project and describe the app you want to create."
+        )
+    }
+
+    var generatedSummary by remember {
+        mutableStateOf("")
+    }
 
     val selectedProject = projects.firstOrNull {
         it.id == selectedProjectId
     }
 
     Column(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier.fillMaxWidth()
     ) {
         Spacer(Modifier.height(22.dp))
 
@@ -342,7 +391,7 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
         )
 
         Text(
-            "Free-first project generation workspace",
+            "Automatic AI model selection and project generation",
             color = ForgeMuted,
             fontSize = 13.sp
         )
@@ -350,7 +399,9 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
         Spacer(Modifier.height(16.dp))
 
         Card(
-            colors = CardDefaults.cardColors(containerColor = ForgePanel),
+            colors = CardDefaults.cardColors(
+                containerColor = ForgePanel
+            ),
             shape = RoundedCornerShape(14.dp)
         ) {
             Column(
@@ -359,7 +410,7 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
                     .padding(14.dp)
             ) {
                 Text(
-                    "GENERATION PROVIDER",
+                    "AI AUTO ROUTER",
                     color = ForgeAccent,
                     fontWeight = FontWeight.Bold,
                     fontSize = 10.sp
@@ -368,21 +419,41 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
                 Spacer(Modifier.height(6.dp))
 
                 Text(
-                    geminiProvider.displayName,
+                    "OpenRouter → Gemini → Offline",
                     fontWeight = FontWeight.SemiBold
                 )
 
                 Text(
-                    "Primary: Gemini cloud AI. Automatic fallback: offline templates.",
+                    "OpenRouter free models are tried first. " +
+                        "If unavailable, APKForge tries Gemini, " +
+                        "then offline generation.",
                     color = ForgeMuted,
                     fontSize = 11.sp
                 )
+
+                Spacer(Modifier.height(8.dp))
+
+                TextButton(
+                    onClick = {
+                        status =
+                            if (settingsStore.hasOpenRouterApiKey()) {
+                                "OpenRouter API key is configured."
+                            } else {
+                                "Add your OpenRouter key in Settings."
+                            }
+                    }
+                ) {
+                    Text("Check AI configuration")
+                }
             }
         }
 
         Spacer(Modifier.height(14.dp))
 
-        Text("Target project", fontWeight = FontWeight.SemiBold)
+        Text(
+            "Target project",
+            fontWeight = FontWeight.SemiBold
+        )
 
         Spacer(Modifier.height(6.dp))
 
@@ -411,7 +482,10 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
                     )
 
                     Column {
-                        Text(project.name, fontSize = 13.sp)
+                        Text(
+                            project.name,
+                            fontSize = 13.sp
+                        )
 
                         Text(
                             project.packageName,
@@ -434,7 +508,9 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
 
         OutlinedTextField(
             value = description,
-            onValueChange = { description = it },
+            onValueChange = {
+                description = it
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 110.dp),
@@ -457,7 +533,8 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
                 } else {
                     scope.launch {
                         isGenerating = true
-                        status = "Connecting to Gemini..."
+                        status =
+                            "Selecting the best available AI model..."
                         generatedSummary = ""
 
                         try {
@@ -467,34 +544,21 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
                                 description = description
                             )
 
-                            val result = try {
-                                geminiProvider.generate(request)
-                            } catch (geminiError: Exception) {
-                                status =
-                                    "Gemini unavailable. Trying offline fallback."
+                            val result = aiProvider.generate(request)
 
-                                val fallback =
-                                    offlineProvider.generate(request)
-
-                                status =
-                                    "Gemini unavailable. Offline fallback used. Reason: ${
-                                        geminiError.message ?: "Unknown Gemini error"
-                                    }"
-
-                                fallback
-                            }
-
-                            writer.save(target.id, result.files)
+                            writer.save(
+                                target.id,
+                                result.files
+                            )
 
                             generatedSummary =
                                 "${result.providerName}: ${result.summary}"
 
                             status =
-                                if (result.providerName == geminiProvider.displayName) {
-                                    "Gemini generated and saved ${result.files.size} files to ${target.name}."
-                                } else {
-                                    "$status Files saved to ${target.name}."
-                                }
+                                "Generation completed using " +
+                                    "${result.providerName}. " +
+                                    "${result.files.size} files saved " +
+                                    "to ${target.name}."
 
                         } catch (error: Exception) {
                             status = error.message
@@ -544,6 +608,8 @@ private fun AiStudioScreen(projects: List<ForgeProject>) {
             color = ForgeMuted,
             fontSize = 11.sp
         )
+
+        Spacer(Modifier.height(20.dp))
     }
 }
 
@@ -580,7 +646,11 @@ private fun HomeScreen(
     Spacer(Modifier.height(22.dp))
 
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        MetricCard("PROJECTS", projectCount.toString(), Modifier.weight(1f))
+        MetricCard(
+            "PROJECTS",
+            projectCount.toString(),
+            Modifier.weight(1f)
+        )
         MetricCard("BUILDS", "0", Modifier.weight(1f))
         MetricCard("STATUS", "Ready", Modifier.weight(1f))
     }
@@ -605,7 +675,7 @@ private fun HomeScreen(
 
     ActionCard(
         "✦  Open AI Studio",
-        "Generate Android application files with Gemini",
+        "Generate Android application files with automatic AI routing",
         onOpenAi
     )
 
@@ -622,7 +692,7 @@ private fun HomeScreen(
     InfoLine("01", "Project workspace", "Local save enabled")
     InfoLine("02", "Offline file generation", "Available")
     InfoLine("03", "GitHub cloud build", "Workflow ready")
-    InfoLine("04", "Gemini AI integration", "Connected in code")
+    InfoLine("04", "AI automatic routing", "Configured")
 
     Spacer(Modifier.height(20.dp))
 }
@@ -635,7 +705,9 @@ private fun MetricCard(
 ) {
     Card(
         modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = ForgePanel),
+        colors = CardDefaults.cardColors(
+            containerColor = ForgePanel
+        ),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(Modifier.padding(12.dp)) {
@@ -667,16 +739,28 @@ private fun ActionCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(containerColor = ForgePanel),
+            .clickable {
+                onClick()
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = ForgePanel
+        ),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+            Text(
+                title,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 15.sp
+            )
 
             Spacer(Modifier.height(4.dp))
 
-            Text(subtitle, color = ForgeMuted, fontSize = 12.sp)
+            Text(
+                subtitle,
+                color = ForgeMuted,
+                fontSize = 12.sp
+            )
         }
     }
 }
@@ -694,11 +778,19 @@ private fun InfoLine(
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(number, color = ForgeAccent, fontWeight = FontWeight.Bold)
+            Text(
+                number,
+                color = ForgeAccent,
+                fontWeight = FontWeight.Bold
+            )
             Text(title, fontSize = 13.sp)
         }
 
-        Text(status, color = ForgeMuted, fontSize = 11.sp)
+        Text(
+            status,
+            color = ForgeMuted,
+            fontSize = 11.sp
+        )
     }
 }
 
@@ -708,11 +800,17 @@ private fun ProjectsScreen(
     onOpen: (ForgeProject) -> Unit,
     onSave: () -> Unit
 ) {
-    var showEditor by remember { mutableStateOf(false) }
+    var showEditor by remember {
+        mutableStateOf(false)
+    }
 
     Spacer(Modifier.height(22.dp))
 
-    Text("Projects", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+    Text(
+        "Projects",
+        fontSize = 28.sp,
+        fontWeight = FontWeight.Bold
+    )
 
     Text(
         "Your projects are saved on this device.",
@@ -722,7 +820,11 @@ private fun ProjectsScreen(
 
     Spacer(Modifier.height(16.dp))
 
-    Button(onClick = { showEditor = true }) {
+    Button(
+        onClick = {
+            showEditor = true
+        }
+    ) {
         Text("＋  New project")
     }
 
@@ -734,15 +836,22 @@ private fun ProjectsScreen(
             color = ForgeMuted
         )
     } else {
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
             items(projects.size) { index ->
                 val project = projects[index]
 
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onOpen(project) },
-                    colors = CardDefaults.cardColors(containerColor = ForgePanel),
+                        .clickable {
+                            onOpen(project)
+                        },
+                    colors = CardDefaults.cardColors(
+                        containerColor = ForgePanel
+                    ),
                     shape = RoundedCornerShape(14.dp)
                 ) {
                     Column(
@@ -750,7 +859,10 @@ private fun ProjectsScreen(
                             .fillMaxWidth()
                             .padding(16.dp)
                     ) {
-                        Text(project.name, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            project.name,
+                            fontWeight = FontWeight.SemiBold
+                        )
 
                         Spacer(Modifier.height(4.dp))
 
@@ -777,7 +889,9 @@ private fun ProjectsScreen(
         ProjectEditorDialog(
             project = null,
             existingProjects = projects,
-            onDismiss = { showEditor = false },
+            onDismiss = {
+                showEditor = false
+            },
             onSave = { newProject ->
                 (projects as MutableList<ForgeProject>).add(newProject)
                 onSave()
@@ -795,19 +909,33 @@ private fun ProjectDetailScreen(
     onUpdate: (ForgeProject) -> Unit,
     onDelete: () -> Unit
 ) {
-    var showEditor by remember(project.id) { mutableStateOf(false) }
-    var showDeleteConfirm by remember(project.id) { mutableStateOf(false) }
-    var showWorkspace by remember(project.id) { mutableStateOf(false) }
+    var showEditor by remember(project.id) {
+        mutableStateOf(false)
+    }
+
+    var showDeleteConfirm by remember(project.id) {
+        mutableStateOf(false)
+    }
+
+    var showWorkspace by remember(project.id) {
+        mutableStateOf(false)
+    }
 
     if (showWorkspace) {
         ProjectWorkspaceScreen(
             projectId = project.id,
             projectName = project.name,
             packageName = project.packageName,
-            onBack = { showWorkspace = false }
+            onBack = {
+                showWorkspace = false
+            }
         )
     } else {
-        Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+        ) {
             Spacer(Modifier.height(22.dp))
 
             TextButton(onClick = onBack) {
@@ -831,7 +959,9 @@ private fun ProjectDetailScreen(
             Spacer(Modifier.height(18.dp))
 
             Card(
-                colors = CardDefaults.cardColors(containerColor = ForgePanel),
+                colors = CardDefaults.cardColors(
+                    containerColor = ForgePanel
+                ),
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Column(
@@ -871,7 +1001,9 @@ private fun ProjectDetailScreen(
             Spacer(Modifier.height(16.dp))
 
             Button(
-                onClick = { showWorkspace = true },
+                onClick = {
+                    showWorkspace = true
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Open file manager & code editor")
@@ -880,7 +1012,9 @@ private fun ProjectDetailScreen(
             Spacer(Modifier.height(8.dp))
 
             OutlinedButton(
-                onClick = { showEditor = true },
+                onClick = {
+                    showEditor = true
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Edit project details")
@@ -889,11 +1023,15 @@ private fun ProjectDetailScreen(
             Spacer(Modifier.height(8.dp))
 
             OutlinedButton(
-                onClick = { showDeleteConfirm = true },
+                onClick = {
+                    showDeleteConfirm = true
+                },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Delete project")
             }
+
+            Spacer(Modifier.height(20.dp))
         }
     }
 
@@ -901,7 +1039,9 @@ private fun ProjectDetailScreen(
         ProjectEditorDialog(
             project = project,
             existingProjects = existingProjects,
-            onDismiss = { showEditor = false },
+            onDismiss = {
+                showEditor = false
+            },
             onSave = {
                 onUpdate(it)
                 showEditor = false
@@ -911,8 +1051,12 @@ private fun ProjectDetailScreen(
 
     if (showDeleteConfirm) {
         AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete ${project.name}?") },
+            onDismissRequest = {
+                showDeleteConfirm = false
+            },
+            title = {
+                Text("Delete ${project.name}?")
+            },
             text = {
                 Text(
                     "This removes the saved project details from this device. This cannot be undone."
@@ -930,7 +1074,9 @@ private fun ProjectDetailScreen(
             },
             dismissButton = {
                 TextButton(
-                    onClick = { showDeleteConfirm = false }
+                    onClick = {
+                        showDeleteConfirm = false
+                    }
                 ) {
                     Text("Cancel")
                 }
@@ -958,29 +1104,47 @@ private fun ProjectEditorDialog(
     val validPackage = PackagePattern.matches(packageName.trim())
 
     val duplicatePackage = existingProjects.any {
-        it.packageName.equals(packageName.trim(), ignoreCase = true) &&
-            it.id != project?.id
+        it.packageName.equals(
+            packageName.trim(),
+            ignoreCase = true
+        ) && it.id != project?.id
     }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(if (project == null) "Create project" else "Edit project")
+            Text(
+                if (project == null) {
+                    "Create project"
+                } else {
+                    "Edit project"
+                }
+            )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Project name") },
+                    onValueChange = {
+                        name = it
+                    },
+                    label = {
+                        Text("Project name")
+                    },
                     singleLine = true,
                     isError = name.isNotBlank() && !validName
                 )
 
                 OutlinedTextField(
                     value = packageName,
-                    onValueChange = { packageName = it },
-                    label = { Text("Package name") },
+                    onValueChange = {
+                        packageName = it
+                    },
+                    label = {
+                        Text("Package name")
+                    },
                     singleLine = true,
                     isError = packageName.isNotBlank() &&
                         (!validPackage || duplicatePackage)
@@ -1011,18 +1175,27 @@ private fun ProjectEditorDialog(
         },
         confirmButton = {
             Button(
-                enabled = validName && validPackage && !duplicatePackage,
+                enabled = validName &&
+                    validPackage &&
+                    !duplicatePackage,
                 onClick = {
                     onSave(
                         ForgeProject(
-                            id = project?.id ?: UUID.randomUUID().toString(),
+                            id = project?.id
+                                ?: UUID.randomUUID().toString(),
                             name = name.trim(),
                             packageName = packageName.trim()
                         )
                     )
                 }
             ) {
-                Text(if (project == null) "Create" else "Save")
+                Text(
+                    if (project == null) {
+                        "Create"
+                    } else {
+                        "Save"
+                    }
+                )
             }
         },
         dismissButton = {
@@ -1041,11 +1214,19 @@ private fun InfoScreen(
 ) {
     Spacer(Modifier.height(22.dp))
 
-    Text(title, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+    Text(
+        title,
+        fontSize = 28.sp,
+        fontWeight = FontWeight.Bold
+    )
 
     Spacer(Modifier.height(6.dp))
 
-    Text(subtitle, color = ForgeMuted, fontSize = 13.sp)
+    Text(
+        subtitle,
+        color = ForgeMuted,
+        fontSize = 13.sp
+    )
 
     Spacer(Modifier.height(20.dp))
 
@@ -1054,14 +1235,20 @@ private fun InfoScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(bottom = 10.dp),
-            colors = CardDefaults.cardColors(containerColor = ForgePanel),
+            colors = CardDefaults.cardColors(
+                containerColor = ForgePanel
+            ),
             shape = RoundedCornerShape(14.dp)
         ) {
             Row(
                 modifier = Modifier.padding(16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("•", color = ForgeAccent, fontSize = 18.sp)
+                Text(
+                    "•",
+                    color = ForgeAccent,
+                    fontSize = 18.sp
+                )
                 Text(item, fontSize = 13.sp)
             }
         }
